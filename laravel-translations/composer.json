@@ -1,0 +1,28 @@
+{
+    "name": "danhorrors/laravel-translations",
+    "description": "Laravel Translation Management Service",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Dan Horrors",
+            "email": "dan@madeeasy.app"
+        }
+    ],
+    "require": {
+        "php": "*",
+        "illuminate/support": "*",
+        "phpoffice/phpspreadsheet": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "danhorrors\\Translations\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "danhorrors\\Translations\\TranslationServiceProvider"
+            ]
+        }
+    }
+}
