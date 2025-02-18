@@ -429,7 +429,11 @@ class TranslationService
                 $key = $row[1];
                 for ($i = 2; $i < count($header); $i++) {
                     $lang = $header[$i];
-                    $translations[$file][$key][$lang] = $row[$i] ?? '';
+                    $value = $row[$i] ?? '';
+                    if (trim($value) === '') {
+                        continue;
+                    }
+                    $translations[$file][$key][$lang] = $value;
                 }
             }
             fclose($handle);
