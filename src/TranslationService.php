@@ -513,7 +513,17 @@ class TranslationService
             foreach ($keys as $key => $langs) {
                 foreach ($langs as $lang => $value) {
                     try {
-                        $existing = $this->readExistingTranslations($langPath, $lang, $file);
+                        try {
+                            $existing = $this->readExistingTranslations($langPath, $lang, $file);
+                        } catch (\ErrorException $e) {
+                            if (strpos($e->getMessage(), 'Illegal string offset') !== false) {
+                                $this->logError("Illegal string offset error: " . $e->getMessage());
+                                echo "[Update] Illegal string offset error encountered. Continuing to next entry...\n";
+                                continue;
+                            } else {
+                                throw $e;
+                            }
+                        }
                         $nestedKey = $this->unflattenArray([$key => $value]);
                         $existing = array_merge_recursive($existing, $nestedKey);
                         $this->saveTranslationFile($langPath, $lang, $file, $existing);
