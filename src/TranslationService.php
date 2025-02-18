@@ -122,7 +122,16 @@ class TranslationService
                 echo "[Import] CSV data read successfully.\n";
         }
         $this->validateNestedArrayStructure($translations);
-        $this->updateTranslations($this->langPath, $translations);
+        try {
+            $this->updateTranslations($this->langPath, $translations);
+        } catch (\ErrorException $e) {
+            if (strpos($e->getMessage(), 'Illegal string offset') !== false) {
+                $this->logError("Illegal string offset error: " . $e->getMessage());
+                echo "[Import] Illegal string offset error encountered. Continuing to next entry...\n";
+            } else {
+                throw $e;
+            }
+        }
         echo "[Import] Import completed: $inputFile\n";
     }
 
