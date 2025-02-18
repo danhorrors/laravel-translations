@@ -121,6 +121,7 @@ class TranslationService
                 $translations = $this->readCSV($filePath);
                 echo "[Import] CSV data read successfully.\n";
         }
+        $this->validateNestedArrayStructure($translations);
         $this->updateTranslations($this->langPath, $translations);
         echo "[Import] Import completed: $inputFile\n";
     }
@@ -286,6 +287,40 @@ class TranslationService
             }
         }
         return $result;
+    }
+
+    /**
+     * Reverse the flattening of a dot-notated array to maintain the nested structure.
+     */
+    protected function unflattenArray($array)
+    {
+        $result = [];
+        foreach ($array as $key => $value) {
+            $keys = explode('.', $key);
+            $temp = &$result;
+            foreach ($keys as $k) {
+                if (!isset($temp[$k])) {
+                    $temp[$k] = [];
+                }
+                $temp = &$temp[$k];
+            }
+            $temp = $value;
+        }
+        return $result;
+    }
+
+    /**
+     * Validate the structure of nested arrays to ensure correct formatting.
+     */
+    protected function validateNestedArrayStructure($array, $parentKey = '')
+    {
+        foreach ($array as $key => $value) {
+            if (is_array($value)) {
+                $this->validateNestedArrayStructure($value, $parentKey . $key . '.');
+            } elseif (!is_string($value)) {
+                throw new \Exception("Invalid value at key '{$parentKey}{$key}': must be a string.");
+            }
+        }
     }
 
     /**
@@ -465,19 +500,8 @@ class TranslationService
             foreach ($keys as $key => $langs) {
                 foreach ($langs as $lang => $value) {
                     $existing = $this->readExistingTranslations($langPath, $lang, $file);
-                    if (strpos($key, '.') !== false) {
-                        $keysArray = explode('.', $key);
-                        $temp = &$existing;
-                        foreach ($keysArray as $k) {
-                            if (!isset($temp[$k])) {
-                                $temp[$k] = [];
-                            }
-                            $temp = &$temp[$k];
-                        }
-                        $temp = $value;
-                    } else {
-                        $existing[$key] = $value;
-                    }
+                    $nestedKey = $this->unflattenArray([$key => $value]);
+                    $existing = array_merge_recursive($existing, $nestedKey);
                     $this->saveTranslationFile($langPath, $lang, $file, $existing);
                     echo "[Update] Updated '$key' for file '$file' in language '$lang'.\n";
                 }
