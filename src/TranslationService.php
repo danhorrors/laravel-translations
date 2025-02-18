@@ -503,11 +503,16 @@ class TranslationService
         foreach ($translations as $file => $keys) {
             foreach ($keys as $key => $langs) {
                 foreach ($langs as $lang => $value) {
-                    $existing = $this->readExistingTranslations($langPath, $lang, $file);
-                    $nestedKey = $this->unflattenArray([$key => $value]);
-                    $existing = array_merge_recursive($existing, $nestedKey);
-                    $this->saveTranslationFile($langPath, $lang, $file, $existing);
-                    echo "[Update] Updated '$key' for file '$file' in language '$lang'.\n";
+                    try {
+                        $existing = $this->readExistingTranslations($langPath, $lang, $file);
+                        $nestedKey = $this->unflattenArray([$key => $value]);
+                        $existing = array_merge_recursive($existing, $nestedKey);
+                        $this->saveTranslationFile($langPath, $lang, $file, $existing);
+                        echo "[Update] Updated '$key' for file '$file' in language '$lang'.\n";
+                    } catch (\Exception $e) {
+                        $this->logError("Error updating '$key' for file '$file' in language '$lang': " . $e->getMessage());
+                        echo "[Update] Error updating '$key' for file '$file' in language '$lang'. Skipping...\n";
+                    }
                 }
             }
         }
@@ -552,5 +557,15 @@ class TranslationService
         }
         $output .= "]";
         return $output;
+    }
+
+    /**
+     * Log an error message to a log file.
+     */
+    protected function logError($message)
+    {
+        $logFile = storage_path('logs/translation_errors.log');
+        $timestamp = date('Y-m-d H:i:s');
+        file_put_contents($logFile, "[$timestamp] $message\n", FILE_APPEND);
     }
 }
