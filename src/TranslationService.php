@@ -123,7 +123,7 @@ class TranslationService
         }
         $this->validateNestedArrayStructure($translations);
         try {
-            $this->updateTranslations($this->langPath, $translations);
+            $this->updateTranslations($translations);
         } catch (\ErrorException $e) {
             if (strpos($e->getMessage(), 'Illegal string offset') !== false) {
                 $this->logError("Illegal string offset error: " . $e->getMessage());
@@ -506,7 +506,7 @@ class TranslationService
     /**
      * Update translation PHP files with imported translations.
      */
-    protected function updateTranslations($langPath, $translations)
+    protected function updateTranslations($translations)
     {
         echo "[Update] Starting update of translation files...\n";
         foreach ($translations as $file => $keys) {
@@ -514,7 +514,7 @@ class TranslationService
                 foreach ($langs as $lang => $value) {
                     try {
                         try {
-                            $existing = $this->readExistingTranslations($langPath, $lang, $file);
+                            $existing = $this->readExistingTranslations($lang, $file);
                         } catch (\ErrorException $e) {
                             if (strpos($e->getMessage(), 'Illegal string offset') !== false) {
                                 $this->logError("Illegal string offset error: " . $e->getMessage());
@@ -526,7 +526,7 @@ class TranslationService
                         }
                         $nestedKey = $this->unflattenArray([$key => $value]);
                         $existing = array_merge_recursive($existing, $nestedKey);
-                        $this->saveTranslationFile($langPath, $lang, $file, $existing);
+                        $this->saveTranslationFile($lang, $file, $existing);
                         echo "[Update] Updated '$key' for file '$file' in language '$lang'.\n";
                     } catch (\Exception $e) {
                         $this->logError("Error updating '$key' for file '$file' in language '$lang': " . $e->getMessage());
@@ -541,9 +541,9 @@ class TranslationService
     /**
      * Read existing translations from a PHP file.
      */
-    protected function readExistingTranslations($langPath, $lang, $file)
+    protected function readExistingTranslations($lang, $file)
     {
-        $phpFilePath = $langPath . '/' . $lang . '/' . $file . '.php';
+        $phpFilePath = $this->langPath . '/' . $lang . '/' . $file . '.php';
         if (file_exists($phpFilePath)) {
             echo "[Read] Reading existing translations from: $phpFilePath\n";
             return include $phpFilePath;
@@ -555,9 +555,9 @@ class TranslationService
     /**
      * Save the updated translation data back to the PHP file.
      */
-    protected function saveTranslationFile($langPath, $lang, $file, $data)
+    protected function saveTranslationFile($lang, $file, $data)
     {
-        $phpFilePath = $langPath . '/' . $lang . '/' . $file . '.php';
+        $phpFilePath = $this->langPath . '/' . $lang . '/' . $file . '.php';
         $content = "<?php\n\nreturn " . $this->arrayToLaravelArray($data) . ";\n";
         file_put_contents($phpFilePath, $content);
         echo "[Save] Saved updated translations to: $phpFilePath\n";
