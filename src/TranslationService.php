@@ -91,6 +91,7 @@ class TranslationService
         echo "[Export] Export completed: $outputFile\n";
     }
 
+
     /**
      * Import translations from a file in the specified format.
      */
@@ -104,6 +105,7 @@ class TranslationService
             throw new \Exception("File not found: $inputFile");
         }
 
+        // Convert file contents into $translations array
         switch ($format) {
             case 'json':
                 $translations = json_decode(File::get($filePath), true);
@@ -118,21 +120,131 @@ class TranslationService
                 echo "[Import] XML data read successfully.\n";
                 break;
             default:
+                // CSV
                 $translations = $this->readCSV($filePath);
                 echo "[Import] CSV data read successfully.\n";
         }
-        $this->validateNestedArrayStructure($translations);
-        try {
-            $this->updateTranslations($translations);
-        } catch (\ErrorException $e) {
-            if (strpos($e->getMessage(), 'Illegal string offset') !== false) {
-                $this->logError("Illegal string offset error: " . $e->getMessage());
-                echo "[Import] Illegal string offset error encountered. Continuing to next entry...\n";
-            } else {
-                throw $e;
+
+        // Merge the CSV-based keys into our existing files
+        $this->mergeCSVTranslationsIntoPhp($translations);
+
+        echo "[Import] Import completed: $inputFile\n";
+    }
+    /**
+     * Merge the CSV translations into existing PHP translation files.
+     *
+     * @param array $translations The data from CSV (or other format) in the structure:
+     *   [
+     *       'some_file' => [
+     *           'some.nested.key' => [
+     *               'en' => 'Hello',
+     *               'fr' => 'Bonjour',
+     *               ...
+     *           ],
+     *           'another_key' => [
+     *               'en' => 'Goodbye',
+     *               'fr' => 'Au revoir',
+     *               ...
+     *           ],
+     *       ],
+     *       'another_file' => [...],
+     *   ]
+     */
+    protected function mergeCSVTranslationsIntoPhp(array $translations)
+    {
+        echo "[Update] Merging CSV data into existing PHP translation files...\n";
+
+        // 1) Group everything by filename -> language -> [dotKey => value]
+        //    So we can do one read/write per file+language.
+        //    $filesToLang = [
+        //        'some_file' => [
+        //            'en' => [ 'some.nested.key' => 'Hello', 'another_key' => 'Goodbye' ],
+        //            'fr' => [ 'some.nested.key' => 'Bonjour', 'another_key' => 'Au revoir' ],
+        //        ],
+        //        'another_file' => [...]
+        //    ];
+        $filesToLang = [];
+
+        foreach ($translations as $fileName => $keys) {
+            // $keys = [ 'some.nested.key' => [ 'en' => 'Hello', 'fr' => 'Bonjour'], ...]
+            foreach ($keys as $dotKey => $langValues) {
+                // $langValues = [ 'en' => 'Hello', 'fr' => 'Bonjour' ]
+                foreach ($langValues as $lang => $value) {
+                    $filesToLang[$fileName][$lang][$dotKey] = $value;
+                }
             }
         }
-        echo "[Import] Import completed: $inputFile\n";
+
+        // 2) For each file/language group, read the existing file, merge the dot-keys, and write back out
+        foreach ($filesToLang as $fileName => $langMap) {
+            foreach ($langMap as $lang => $dotKeys) {
+                // dotKeys => [ 'some.nested.key' => 'Hello', 'another_key' => 'Goodbye', ... ]
+
+                // 2a) Read existing
+                $phpFilePath = $this->langPath . '/' . $lang . '/' . $fileName . '.php';
+                $existing = $this->readPhpTranslations($phpFilePath);
+
+                // 2b) Merge each CSV key into $existing
+                foreach ($dotKeys as $dotKey => $value) {
+                    $existing = $this->expandDotNotation($dotKey, $value, $existing);
+                }
+
+                // 2c) Write final merged array to disk
+                $this->savePhpTranslations($phpFilePath, $existing);
+
+                echo "[Update] Merged $fileName for [$lang], updated ".count($dotKeys)." key(s).\n";
+            }
+        }
+
+        echo "[Update] All CSV-based keys have been merged into the existing files.\n";
+    }
+    /**
+     * Safely read a PHP translation file into an array.
+     */
+    protected function readPhpTranslations($phpFilePath)
+    {
+        if (file_exists($phpFilePath)) {
+            // Safely include
+            return include $phpFilePath;
+        }
+
+        // If it doesn't exist yet, return empty array so we can build one
+        return [];
+    }
+
+    /**
+     * Save an array to a PHP translation file.
+     */
+    protected function savePhpTranslations($phpFilePath, array $data)
+    {
+        // Ensure directory exists
+        if (!File::isDirectory(dirname($phpFilePath))) {
+            File::makeDirectory(dirname($phpFilePath), 0755, true);
+        }
+
+        // Write the file
+        $content = "<?php\n\nreturn " . var_export($data, true) . ";\n";
+        file_put_contents($phpFilePath, $content);
+
+        echo "[Save] Wrote: $phpFilePath\n";
+    }
+    /**
+     * Insert $value into $base array at the path indicated by $dotKey
+     * (e.g. "some.nested.key" => [ 'some' => [ 'nested' => [ 'key' => $value ] ] ])
+     */
+    protected function expandDotNotation($dotKey, $value, array $base = [])
+    {
+        $keys = explode('.', $dotKey);
+        $current = &$base;
+        foreach ($keys as $k) {
+            if (!isset($current[$k]) || !is_array($current[$k])) {
+                $current[$k] = [];
+            }
+            $current = &$current[$k];
+        }
+        $current = $value;
+
+        return $base;
     }
 
     /**
@@ -299,40 +411,6 @@ class TranslationService
     }
 
     /**
-     * Reverse the flattening of a dot-notated array to maintain the nested structure.
-     */
-    protected function unflattenArray($array)
-    {
-        $result = [];
-        foreach ($array as $key => $value) {
-            $keys = explode('.', $key);
-            $temp = &$result;
-            foreach ($keys as $k) {
-                if (!isset($temp[$k])) {
-                    $temp[$k] = [];
-                }
-                $temp = &$temp[$k];
-            }
-            $temp = $value;
-        }
-        return $result;
-    }
-
-    /**
-     * Validate the structure of nested arrays to ensure correct formatting.
-     */
-    protected function validateNestedArrayStructure($array, $parentKey = '')
-    {
-        foreach ($array as $key => $value) {
-            if (is_array($value)) {
-                $this->validateNestedArrayStructure($value, $parentKey . $key . '.');
-            } elseif (!is_string($value)) {
-                throw new \Exception("Invalid value at key '{$parentKey}{$key}': must be a string.");
-            }
-        }
-    }
-
-    /**
      * Extract available languages from the translations array.
      * Forces English ('en') to appear first if available.
      */
@@ -438,11 +516,7 @@ class TranslationService
                 $key = $row[1];
                 for ($i = 2; $i < count($header); $i++) {
                     $lang = $header[$i];
-                    $value = $row[$i] ?? '';
-                    if (trim($value) === '') {
-                        continue;
-                    }
-                    $translations[$file][$key][$lang] = $value;
+                    $translations[$file][$key][$lang] = $row[$i] ?? '';
                 }
             }
             fclose($handle);
@@ -506,32 +580,28 @@ class TranslationService
     /**
      * Update translation PHP files with imported translations.
      */
-    protected function updateTranslations($translations)
+    protected function updateTranslations($langPath, $translations)
     {
         echo "[Update] Starting update of translation files...\n";
         foreach ($translations as $file => $keys) {
             foreach ($keys as $key => $langs) {
                 foreach ($langs as $lang => $value) {
-                    try {
-                        try {
-                            $existing = $this->readExistingTranslations($lang, $file);
-                        } catch (\ErrorException $e) {
-                            if (strpos($e->getMessage(), 'Illegal string offset') !== false) {
-                                $this->logError("Illegal string offset error: " . $e->getMessage());
-                                echo "[Update] Illegal string offset error encountered. Continuing to next entry...\n";
-                                continue;
-                            } else {
-                                throw $e;
+                    $existing = $this->readExistingTranslations($langPath, $lang, $file);
+                    if (strpos($key, '.') !== false) {
+                        $keysArray = explode('.', $key);
+                        $temp = &$existing;
+                        foreach ($keysArray as $k) {
+                            if (!isset($temp[$k])) {
+                                $temp[$k] = [];
                             }
+                            $temp = &$temp[$k];
                         }
-                        $nestedKey = $this->unflattenArray([$key => $value]);
-                        $existing = array_merge_recursive($existing, $nestedKey);
-                        $this->saveTranslationFile($lang, $file, $existing);
-                        echo "[Update] Updated '$key' for file '$file' in language '$lang'.\n";
-                    } catch (\Exception $e) {
-                        $this->logError("Error updating '$key' for file '$file' in language '$lang': " . $e->getMessage());
-                        echo "[Update] Error updating '$key' for file '$file' in language '$lang'. Skipping...\n";
+                        $temp = $value;
+                    } else {
+                        $existing[$key] = $value;
                     }
+                    $this->saveTranslationFile($langPath, $lang, $file, $existing);
+                    echo "[Update] Updated '$key' for file '$file' in language '$lang'.\n";
                 }
             }
         }
@@ -541,9 +611,9 @@ class TranslationService
     /**
      * Read existing translations from a PHP file.
      */
-    protected function readExistingTranslations($lang, $file)
+    protected function readExistingTranslations($langPath, $lang, $file)
     {
-        $phpFilePath = $this->langPath . '/' . $lang . '/' . $file . '.php';
+        $phpFilePath = $langPath . '/' . $lang . '/' . $file . '.php';
         if (file_exists($phpFilePath)) {
             echo "[Read] Reading existing translations from: $phpFilePath\n";
             return include $phpFilePath;
@@ -555,36 +625,11 @@ class TranslationService
     /**
      * Save the updated translation data back to the PHP file.
      */
-    protected function saveTranslationFile($lang, $file, $data)
+    protected function saveTranslationFile($langPath, $lang, $file, $data)
     {
-        $phpFilePath = $this->langPath . '/' . $lang . '/' . $file . '.php';
-        $content = "<?php\n\nreturn " . $this->arrayToLaravelArray($data) . ";\n";
+        $phpFilePath = $langPath . '/' . $lang . '/' . $file . '.php';
+        $content = "<?php\n\nreturn " . var_export($data, true) . ";\n";
         file_put_contents($phpFilePath, $content);
         echo "[Save] Saved updated translations to: $phpFilePath\n";
-    }
-
-    /**
-     * Convert an array to Laravel's array structure.
-     */
-    protected function arrayToLaravelArray($array)
-    {
-        $output = "[\n";
-        foreach ($array as $key => $value) {
-            $output .= is_array($value)
-                ? "    '{$key}' => " . $this->arrayToLaravelArray($value) . ",\n"
-                : "    '{$key}' => '" . addslashes($value) . "',\n";
-        }
-        $output .= "]";
-        return $output;
-    }
-
-    /**
-     * Log an error message to a log file.
-     */
-    protected function logError($message)
-    {
-        $logFile = storage_path('logs/translation_errors.log');
-        $timestamp = date('Y-m-d H:i:s');
-        file_put_contents($logFile, "[$timestamp] $message\n", FILE_APPEND);
     }
 }
