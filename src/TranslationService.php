@@ -530,8 +530,23 @@ class TranslationService
     protected function saveTranslationFile($langPath, $lang, $file, $data)
     {
         $phpFilePath = $langPath . '/' . $lang . '/' . $file . '.php';
-        $content = "<?php\n\nreturn " . var_export($data, true) . ";\n";
+        $content = "<?php\n\nreturn " . $this->arrayToLaravelArray($data) . ";\n";
         file_put_contents($phpFilePath, $content);
         echo "[Save] Saved updated translations to: $phpFilePath\n";
+    }
+
+    /**
+     * Convert an array to Laravel's array structure.
+     */
+    protected function arrayToLaravelArray($array)
+    {
+        $output = "[\n";
+        foreach ($array as $key => $value) {
+            $output .= is_array($value)
+                ? "    '{$key}' => " . $this->arrayToLaravelArray($value) . ",\n"
+                : "    '{$key}' => '" . addslashes($value) . "',\n";
+        }
+        $output .= "]";
+        return $output;
     }
 }
